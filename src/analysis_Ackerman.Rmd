@@ -1,0 +1,679 @@
+VIMC Antibody-Effector Assay Study: Ackerman Data
+========================================================
+
+Some text....
+
+```{r loadPackages, message=FALSE, echo=FALSE}
+rm(list=ls(all=TRUE))
+setwd("~/FcR Assay Comparison Study/analysis/FinalStudy/code")
+source("../macro/load_libraries.R")
+load_libraries()
+```
+
+
+```{r ReadIn_Encryption, message=FALSE, echo=FALSE}
+code = read.csv("../encryption_Ackerman/encryption.csv")
+colnames(code) = tolower(colnames(code))
+```
+
+```{r ReadIn_AckermanData, message=FALSE, echo=FALSE}
+man = read.csv("../qdata/FcRFinal_Ackerman_20130314.csv")
+colnames(man) = tolower(colnames(man))
+man = man[,c('assay_subtype','detectionreagent','bead_no','antigen_name','well_role','spec_type','sample','study_control_name',
+             'name','standard_name','expconc','starting_concentration','dilution_factor','fi','fibkgd')]
+
+man$assay_subtype = interaction("Acker", man$assay_subtype)
+
+# Get all obs where well_role is Sample
+man = man[man$well_role=="Unknown",]
+
+# Put name into sample
+man$sample = as.character(man$sample)
+man$name = as.character(man$name)
+man$sample = ifelse(man$name!="",man$name,man$sample)
+
+# Sort data
+man = man[with(man, order(sample,antigen_name,detectionreagent)),]
+
+# Remove pilot study samples FCAC001 to FCAC010
+man = man[!man$sample %in% c("FCAC001","FCAC002","FCAC003","FCAC004","FCAC005","FCAC006","FCAC007","FCAC008","FCAC009","FCAC010"),]
+
+# Merge coding
+man = merge(man, code, by.x=c("sample"),by.y="blinded_sample_id",all.x=TRUE)
+man$group_assignment = as.character(man$group_assignment)
+man$study_control_name = as.character(man$study_control_name)
+man$group_assignment = ifelse(man$study_control_name=="IVIG", "IVIG", man$group_assignment)
+man$group_assignment = ifelse(man$study_control_name=="HIVIG", "HIVIG & HIVIG-C", man$group_assignment)
+man$group_assignment = ifelse(man$study_control_name=="HIVIG-C", "HIVIG & HIVIG-C", man$group_assignment)
+
+# Change colnames
+names(man)[names(man)=="assay_subtype"] = "Assay"
+names(man)[names(man)=="group_assignment"] = "Group"
+
+# Remove plasma samples
+out = data.frame( do.call( rbind, strsplit( man$sample, ' ' ) ) ) 
+names(out) = paste('column',1:2,sep="")
+man = cbind(man, out)
+man = man[man$column1!="Plasma",][,c(1:19)]
+
+# Remove rows where Group is Blank
+man = man[man$Group!="",]
+# Order levels for Group variable
+man$Group <- factor(man$Group, levels = c('CHRONIC Treated','chronic untreated','elite controller','VAX004','Placebo','HIV Seroneg','IVIG','HIVIG & HIVIG-C'),ordered = TRUE)
+
+rm(out)
+```
+
+
+```{r ReadIn_MetaData_Ack, message=FALSE,echo=FALSE}
+meta = read.csv("../qdata/FcRPilotStudy_AntigenMetadata_20130320.csv")
+colnames(meta) = tolower(colnames(meta))
+meta = meta[,c('antigenname_ackermanlab','beadnum_ackerman_fcr_final','study.specific.antigen.name','subtype')]
+
+meta$aginfo = interaction(meta$study.specific.antigen.name, meta$subtype)
+meta$aginfo = as.character(meta$aginfo)
+
+# Conflict in HSV-1 and HSV-2. So resolve by making it HSV. 
+meta$aginfo = ifelse(meta$aginfo=="HSV-2 gG.", "HSV gG.", meta$aginfo)
+
+# Missing Study_Specific_Antigen_Name for "gp120 PVO"
+meta$aginfo = ifelse(meta$aginfo==".B", "r.gp120 PVO.B", meta$aginfo)
+
+# Merge man and meta
+man = merge(man, meta, by.x=c("bead_no"),by.y="beadnum_ackerman_fcr_final",all.x=TRUE)
+```
+
+
+# Data
+A total of n=152 fractionated purified IgG samples and n=10 unfractionated plasma samples along with n=12 monoclonal b12 mutants were evaluated in this study. The number of purified IgG samples in each group is provided below:
+```{r table1, results='asis',echo=FALSE}
+print(xtable(table(man$Group)/474,digit=0),include.colnames=F,type='html')
+```
+
+Here is the list of all 16 detection reagents: 
+```{r table2, results='asis',echo=FALSE}
+print(xtable(cbind(c("Total IgA", "Total IgG", rep("FcR",5),rep("IgG Subclass",4),rep("Lectin",5)),as.character(sort(unique(man$detectionreagent))))),include.colnames=F,type='html')
+```
+
+Here is the list of all 19 Env antigens: 
+```{r table3, results='asis',echo=FALSE}
+aglist_gp120 <- grep("gp120",unique(man$antigen_name),ignore.case=T,value=T)
+aglist_gp140 <- grep("gp140",unique(man$antigen_name),ignore.case=T,value=T)
+aglist_gp41 <- grep("gp41",unique(man$antigen_name),ignore.case=T,value=T)
+aglist_SOSIP <- grep("SOSIP",unique(man$antigen_name),ignore.case=T,value=T)
+
+print(xtable(cbind(c(rep("gp120", length(aglist_gp120)), rep("gp140",length(aglist_gp140)), rep("gp41",length(aglist_gp41)),rep("SOSIP",length(aglist_SOSIP))),c(aglist_gp120,aglist_gp140,aglist_gp41,aglist_SOSIP))),include.colnames=F,type='html')
+```
+
+
+
+# FI by Groups
+
+```{r Boxplot_1_1_Ack,message=FALSE,echo=FALSE,fig.width=10, fig.height=7}
+data = man
+
+q = ggplot(data, aes(x=factor(Group), y=fi)) 
+q + theme_bw()  + ylab("FI") + xlab("Groups") +
+  #scale_y_log10(breaks=c(0.05, 1,10,50), labels=c(eval(cutoffexp),1,10,50)) +
+  scale_y_log10() +
+  #geom_point(size=2,position = position_jitter(width = 0.2, height=0),aes(colour = factor(response)))  +
+  geom_point(size=2,position = position_jitter(width = 0.2, height=0), colour="#FF9900")  +
+  geom_boxplot(outlier.colour = "NA",alpha=0) +  
+  theme(plot.margin = unit(c(1,1,0,1), "cm"),legend.position="bottom",
+       legend.title=element_text(size=7,vjust=-1.6),
+       legend.text=element_text(size=7,vjust=-1.6),
+       axis.text.x = element_text(size=11,angle = 45, hjust = 1,vjust=0.95), 
+       axis.text.y = element_text(size=11), 
+       axis.title.x = element_text(size=14), 
+       axis.title.y = element_text(angle=90, size=14,vjust=-0.4), 
+       strip.text.x = element_text(size = 7), 
+       strip.text.y = element_text(size = 12, face="bold", angle=270))   
+```
+
+# FIBkgd by Groups
+
+```{r Boxplot_1_2_Ack,message=FALSE,echo=FALSE,warning=FALSE,fig.width=10, fig.height=7}
+
+q = ggplot(data, aes(x=factor(Group), y=fibkgd)) 
+q + theme_bw()  + ylab("FIBkgd") + xlab("Groups") +
+  #scale_y_log10(breaks=c(0.05, 1,10,50), labels=c(eval(cutoffexp),1,10,50)) +
+  scale_y_log10() +
+  #geom_point(size=2,position = position_jitter(width = 0.2, height=0),aes(colour = factor(response)))  +
+  geom_point(size=2,position = position_jitter(width = 0.2, height=0), colour="#FF9900")  +
+  geom_boxplot(outlier.colour = "NA",alpha=0) +  
+  theme(plot.margin = unit(c(1,1,0,1), "cm"),legend.position="bottom",
+       legend.title=element_text(size=7,vjust=-1.6),
+       legend.text=element_text(size=7,vjust=-1.6),
+       axis.text.x = element_text(size=11,angle = 45, hjust = 1,vjust=0.95), 
+       axis.text.y = element_text(size=11), 
+       axis.title.x = element_text(size=14), 
+       axis.title.y = element_text(angle=90, size=14,vjust=-0.4), 
+       strip.text.x = element_text(size = 7), 
+       strip.text.y = element_text(size = 12, face="bold", angle=270))
+
+rm(data)
+```
+
+
+# Correlation Heatmap for all Antigens (Conjugate: ahuigg): Ackerman data
+
+```{r CorrHeatMap_1_Ack, message=FALSE,echo=FALSE,warning=FALSE,fig.width=12,fig.height=12}
+ahuigg = man[man$detectionreagent=="ahuIgG",]
+data = ahuigg[,c("sample","Assay","aginfo","spec_type","study_control_name","name","standard_name","expconc",
+                        "starting_concentration","dilution_factor","fi","unblinded_sample_id","Group")]
+
+ahuigg.wide = dcast(data, sample + Assay + Group + spec_type + study_control_name + name + standard_name + expconc + 
+                          starting_concentration + dilution_factor + unblinded_sample_id ~ aginfo, value.var="fi")
+
+cormat = cor(as.matrix(ahuigg.wide[,12:49]), method = "spearman")
+par(oma=c(10,0,0,10))
+par(mar=c(0,0,0,0))
+pairs.breaks = seq(-1, 1, by=0.1)
+#length(pairs.breaks)
+mycol = colorpanel(n=20,low="green",mid="black", high="red")
+#length(mycol)
+hm = borate_heatmap(cormat, breaks=pairs.breaks, col=mycol, symm=TRUE, trace="none",cexCol=1.0,cexRow=1.0)
+```
+
+# Heatmap FI for Sample vs Antigen (for ahuigg): Ackerman data
+
+```{r CorrHeatMap_2_Ack, message=FALSE,echo=FALSE,warning=FALSE,fig.width=14,fig.height=10}
+
+# Heatmap for Sample vs Readout
+data = ahuigg.wide[,c(3,12:49)]
+#rownames(data) = data$Group
+rownames(data) = make.unique(as.character(data$Group))
+data = data[,2:39]
+datascaled = as.matrix(scale(data))
+datascaled1 = as.data.frame(t(datascaled))
+datascaled1 = as.matrix(datascaled1)
+par(oma=c(0,0,0,8))
+par(mar=c(0,0,0,0))
+hm999 = borate_heatmap(datascaled1, breaks=pairs.breaks, col=mycol, scale='none',trace="none", cexCol=0.5,cexRow=1.0)
+rm(data,datascaled,datascaled1,hm999)
+```
+
+
+# Correlation Matrices for each Detection Reagent (using 120 samples)
+
+## Detection Reagent: FcgRIIa
+```{r Corr_1_FcgRIIa, message=FALSE,echo=FALSE,warning=FALSE,fig.width=17,fig.height=12}
+
+#Make Correlation Matrix with Scatter Plot
+corrman = man[man$aginfo %in% c("r.gp120 BaL (293T/Lewis).B","r.gp120 Du151 (HEK 293).C","r.gp120 JRCSF (HEK 293).B","r.gp120 TRO (HEK 293).B",
+                          "r.gp120 CM235 (HEK 293).CRF01_AE","r.gp120 Du156.12 (HEK 293).C","r.gp120 MN (HEK 293).B","r.gp120 YU2 (HEK 293).B",
+                          "r.gp120 93TH975 (insect).CRF01_AE","r.gp120 CM235 (insect).CRF01_AE","r.gp120 IIIB (CHO).B","r.gp120 PVO.B",
+                          "r.gp120 ZM109F.PB4 (HEK 293).C","r.gp140_aa24-680 Bal1A (trimer/HEK 293).B","r.gp140 SF162 (HEK 293).B",
+                          "SOSIP.","r.gp140 CN54 (CHO/ARRRP).CRF07_BC","r.gp41_aa23-170 HxBc2 (HEK 293).B","r.gp140 Du151 (HEK 293).C"),]
+
+corrman = corrman[corrman$Group %in% c("CHRONIC Treated","chronic untreated","elite controller","VAX004"),]
+corrman$Group = as.factor(as.character(corrman$Group))
+
+panel.spearman <- function(x, y, cex.cor, ...) {
+  horizontal <- (par("usr")[1] + par("usr")[2]) / 2;
+  vertical <- (par("usr")[3] + par("usr")[4]) / 2;
+  r <- round(cor(x, y,method="spearman"),digits=2)
+  txt <- format(r)
+  pval = as.double(unlist(cor.test(x, y, method="spearman", alternative="two.sided")[3]))
+  #txt2 <- format(pval, digits=2)
+  #text(horizontal, vertical, txt, cex=3*r)
+  #text(horizontal, vertical-0.2, txt2, cex=3*(1-pval))
+  text(horizontal, vertical, txt, cex=max(0.5, 2*(1-pval)))
+}
+
+mydiag.panel <- function(x, ...){  
+  ll <- par("usr") 
+  rect(ll[1], ll[3], ll[2], ll[4], col="#FDFF65") 
+}
+
+corrman1 = corrman[corrman$detectionreagent=="FcgRIIa",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \n93TH975 \n(insect).\nCRF01_AE",   "r.gp120 \nBaL \n(293T/Lewis)\n.B",    
+                            "r.gp120 \nCM235 \n(insect).\nCRF01_AE",     "r.gp120 \nDu151 \n(HEK 293)\n.C",     "r.gp120 \nDu156.12 \n(HEK 293)\n.C",
+                            "r.gp120 \nIIIB \n(CHO)\n.B",                "r.gp120 \nJRCSF \n(HEK 293)\n.B",     "r.gp120 \nMN \n(HEK 293)\n.B",
+                            "r.gp120 \nPVO.B",                       "r.gp120 \nTRO \n(HEK 293)\n.B",       "r.gp120 \nYU2 \n(HEK 293)\n.B",                  
+                            "r.gp120 \nZM109F.PB4 \n(HEK 293)\n.C",       "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                            "r.gp140 \nDu151 \n(HEK 293)\n.C",           "r.gp140 \nSF162 \n(HEK 293)\n.B",     "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B",        
+                            "SOSIP.")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+
+## Detection Reagent: FcgRIIIb
+```{r Corr_1_FcgRIIIb, message=FALSE,echo=FALSE,warning=FALSE,fig.width=17,fig.height=12}
+
+corrman1 = corrman[corrman$detectionreagent=="FcgRIIIb",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \n93TH975 \n(insect).\nCRF01_AE",   "r.gp120 \nBaL \n(293T/Lewis)\n.B",    
+                   "r.gp120 \nCM235 \n(insect).\nCRF01_AE",     "r.gp120 \nDu151 \n(HEK 293)\n.C",     "r.gp120 \nDu156.12 \n(HEK 293)\n.C",
+                   "r.gp120 \nIIIB \n(CHO)\n.B",                "r.gp120 \nJRCSF \n(HEK 293)\n.B",     "r.gp120 \nMN \n(HEK 293)\n.B",
+                   "r.gp120 \nPVO.B",                       "r.gp120 \nTRO \n(HEK 293)\n.B",       "r.gp120 \nYU2 \n(HEK 293)\n.B",                  
+                   "r.gp120 \nZM109F.PB4 \n(HEK 293)\n.C",       "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                   "r.gp140 \nDu151 \n(HEK 293)\n.C",           "r.gp140 \nSF162 \n(HEK 293)\n.B",     "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B",        
+                   "SOSIP.")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+
+## Detection Reagent: ahuIgA
+```{r Corr_1_ahuIgA, message=FALSE,echo=FALSE,warning=FALSE,fig.width=17,fig.height=12}
+
+corrman1 = corrman[corrman$detectionreagent=="ahuIgA",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \n93TH975 \n(insect).\nCRF01_AE",   "r.gp120 \nBaL \n(293T/Lewis)\n.B",    
+                   "r.gp120 \nCM235 \n(insect).\nCRF01_AE",     "r.gp120 \nDu151 \n(HEK 293)\n.C",     "r.gp120 \nDu156.12 \n(HEK 293)\n.C",
+                   "r.gp120 \nIIIB \n(CHO)\n.B",                "r.gp120 \nJRCSF \n(HEK 293)\n.B",     "r.gp120 \nMN \n(HEK 293)\n.B",
+                   "r.gp120 \nPVO.B",                       "r.gp120 \nTRO \n(HEK 293)\n.B",       "r.gp120 \nYU2 \n(HEK 293)\n.B",                  
+                   "r.gp120 \nZM109F.PB4 \n(HEK 293)\n.C",       "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                   "r.gp140 \nDu151 \n(HEK 293)\n.C",           "r.gp140 \nSF162 \n(HEK 293)\n.B",     "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B",        
+                   "SOSIP.")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+
+## Detection Reagent: FcgRIIb
+```{r Corr_1_FcgRIIb, message=FALSE,echo=FALSE,warning=FALSE,fig.width=17,fig.height=12}
+
+corrman1 = corrman[corrman$detectionreagent=="FcgRIIb",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \n93TH975 \n(insect).\nCRF01_AE",   "r.gp120 \nBaL \n(293T/Lewis)\n.B",    
+                   "r.gp120 \nCM235 \n(insect).\nCRF01_AE",     "r.gp120 \nDu151 \n(HEK 293)\n.C",     "r.gp120 \nDu156.12 \n(HEK 293)\n.C",
+                   "r.gp120 \nIIIB \n(CHO)\n.B",                "r.gp120 \nJRCSF \n(HEK 293)\n.B",     "r.gp120 \nMN \n(HEK 293)\n.B",
+                   "r.gp120 \nPVO.B",                       "r.gp120 \nTRO \n(HEK 293)\n.B",       "r.gp120 \nYU2 \n(HEK 293)\n.B",                  
+                   "r.gp120 \nZM109F.PB4 \n(HEK 293)\n.C",       "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                   "r.gp140 \nDu151 \n(HEK 293)\n.C",           "r.gp140 \nSF162 \n(HEK 293)\n.B",     "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B",        
+                   "SOSIP.")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+
+## Detection Reagent: FcgRIIIa
+```{r Corr_1_FcgRIIIa, message=FALSE,echo=FALSE,warning=FALSE,fig.width=17,fig.height=12}
+
+corrman1 = corrman[corrman$detectionreagent=="FcgRIIIa",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \n93TH975 \n(insect).\nCRF01_AE",   "r.gp120 \nBaL \n(293T/Lewis)\n.B",    
+                   "r.gp120 \nCM235 \n(insect).\nCRF01_AE",     "r.gp120 \nDu151 \n(HEK 293)\n.C",     "r.gp120 \nDu156.12 \n(HEK 293)\n.C",
+                   "r.gp120 \nIIIB \n(CHO)\n.B",                "r.gp120 \nJRCSF \n(HEK 293)\n.B",     "r.gp120 \nMN \n(HEK 293)\n.B",
+                   "r.gp120 \nPVO.B",                       "r.gp120 \nTRO \n(HEK 293)\n.B",       "r.gp120 \nYU2 \n(HEK 293)\n.B",                  
+                   "r.gp120 \nZM109F.PB4 \n(HEK 293)\n.C",       "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                   "r.gp140 \nDu151 \n(HEK 293)\n.C",           "r.gp140 \nSF162 \n(HEK 293)\n.B",     "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B",        
+                   "SOSIP.")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+
+## Detection Reagent: MBL
+```{r Corr_1_MBL, message=FALSE,echo=FALSE,warning=FALSE,fig.width=17,fig.height=12}
+
+corrman1 = corrman[corrman$detectionreagent=="MBL",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \n93TH975 \n(insect).\nCRF01_AE",   "r.gp120 \nBaL \n(293T/Lewis)\n.B",    
+                   "r.gp120 \nCM235 \n(insect).\nCRF01_AE",     "r.gp120 \nDu151 \n(HEK 293)\n.C",     "r.gp120 \nDu156.12 \n(HEK 293)\n.C",
+                   "r.gp120 \nIIIB \n(CHO)\n.B",                "r.gp120 \nJRCSF \n(HEK 293)\n.B",     "r.gp120 \nMN \n(HEK 293)\n.B",
+                   "r.gp120 \nPVO.B",                       "r.gp120 \nTRO \n(HEK 293)\n.B",       "r.gp120 \nYU2 \n(HEK 293)\n.B",                  
+                   "r.gp120 \nZM109F.PB4 \n(HEK 293)\n.C",       "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                   "r.gp140 \nDu151 \n(HEK 293)\n.C",           "r.gp140 \nSF162 \n(HEK 293)\n.B",     "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B",        
+                   "SOSIP.")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+
+## Detection Reagent: VVL
+```{r Corr_1_VVL, message=FALSE,echo=FALSE,warning=FALSE,fig.width=8,fig.height=8}
+
+corrman1 = corrman[corrman$detectionreagent=="VVL",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \nBaL \n(293T/Lewis)\n.B",     "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                            "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+## Detection Reagent: PNA
+```{r Corr_1_PNA, message=FALSE,echo=FALSE,warning=FALSE,fig.width=8,fig.height=8}
+
+corrman1 = corrman[corrman$detectionreagent=="PNA",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \nBaL \n(293T/Lewis)\n.B",     "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                            "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+## Detection Reagent: SNA
+```{r Corr_1_SNA, message=FALSE,echo=FALSE,warning=FALSE,fig.width=8,fig.height=8}
+
+corrman1 = corrman[corrman$detectionreagent=="SNA",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \nBaL \n(293T/Lewis)\n.B",     "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                            "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+## Detection Reagent: LCA
+```{r Corr_1_LCA, message=FALSE,echo=FALSE,warning=FALSE,fig.width=8,fig.height=8}
+
+corrman1 = corrman[corrman$detectionreagent=="LCA",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \nBaL \n(293T/Lewis)\n.B",     "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                            "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+## Detection Reagent: FcgRI
+```{r Corr_1_FcgRI, message=FALSE,echo=FALSE,warning=FALSE,fig.width=17,fig.height=12}
+
+corrman1 = corrman[corrman$detectionreagent=="FcgRI",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \n93TH975 \n(insect).\nCRF01_AE",   "r.gp120 \nBaL \n(293T/Lewis)\n.B",    "r.gp120 \nCM235 \n(HEK 293).\nCRF01_AE",
+                             "r.gp120 \nCM235 \n(insect).\nCRF01_AE",     "r.gp120 \nDu151 \n(HEK 293)\n.C",     "r.gp120 \nDu156.12 \n(HEK 293)\n.C",
+                             "r.gp120 \nIIIB \n(CHO)\n.B",                "r.gp120 \nJRCSF \n(HEK 293)\n.B",     "r.gp120 \nMN \n(HEK 293)\n.B",
+                             "r.gp120 \nPVO.B",                       "r.gp120 \nTRO \n(HEK 293)\n.B",       "r.gp120 \nYU2 \n(HEK 293)\n.B",                  
+                             "r.gp120 \nZM109F.PB4 \n(HEK 293)\n.C",      "r.gp140_aa24-680 \nBal1A \n(trimer/HEK 293)\n.B", "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                             "r.gp140 \nDu151 \n(HEK 293)\n.C",           "r.gp140 \nSF162 \n(HEK 293)\n.B",     "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B",        
+                             "SOSIP.")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+## Detection Reagent: IgG1
+```{r Corr_1_IgG1, message=FALSE,echo=FALSE,warning=FALSE,fig.width=17,fig.height=12}
+
+corrman1 = corrman[corrman$detectionreagent=="IgG1",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \n93TH975 \n(insect).\nCRF01_AE",   "r.gp120 \nBaL \n(293T/Lewis)\n.B",    "r.gp120 \nCM235 \n(HEK 293).\nCRF01_AE",
+                             "r.gp120 \nCM235 \n(insect).\nCRF01_AE",     "r.gp120 \nDu151 \n(HEK 293)\n.C",     "r.gp120 \nDu156.12 \n(HEK 293)\n.C",
+                             "r.gp120 \nIIIB \n(CHO)\n.B",                "r.gp120 \nJRCSF \n(HEK 293)\n.B",     "r.gp120 \nMN \n(HEK 293)\n.B",
+                             "r.gp120 \nPVO.B",                       "r.gp120 \nTRO \n(HEK 293)\n.B",       "r.gp120 \nYU2 \n(HEK 293)\n.B",                  
+                             "r.gp120 \nZM109F.PB4 \n(HEK 293)\n.C",      "r.gp140_aa24-680 \nBal1A \n(trimer/HEK 293)\n.B", "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                             "r.gp140 \nDu151 \n(HEK 293)\n.C",           "r.gp140 \nSF162 \n(HEK 293)\n.B",     "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B",        
+                             "SOSIP.")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+
+
+## Detection Reagent: ahuIgG
+```{r Corr_1_ahuIgG, message=FALSE,echo=FALSE,warning=FALSE,fig.width=17,fig.height=12}
+
+corrman1 = corrman[corrman$detectionreagent=="ahuIgG",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \n93TH975 \n(insect).\nCRF01_AE",   "r.gp120 \nBaL \n(293T/Lewis)\n.B",    "r.gp120 \nCM235 \n(HEK 293).\nCRF01_AE",
+                             "r.gp120 \nCM235 \n(insect).\nCRF01_AE",     "r.gp120 \nDu151 \n(HEK 293)\n.C",     "r.gp120 \nDu156.12 \n(HEK 293)\n.C",
+                             "r.gp120 \nIIIB \n(CHO)\n.B",                "r.gp120 \nJRCSF \n(HEK 293)\n.B",     "r.gp120 \nMN \n(HEK 293)\n.B",
+                             "r.gp120 \nPVO.B",                       "r.gp120 \nTRO \n(HEK 293)\n.B",       "r.gp120 \nYU2 \n(HEK 293)\n.B",                  
+                             "r.gp120 \nZM109F.PB4 \n(HEK 293)\n.C",      "r.gp140_aa24-680 \nBal1A \n(trimer/HEK 293)\n.B", "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                             "r.gp140 \nDu151 \n(HEK 293)\n.C",           "r.gp140 \nSF162 \n(HEK 293)\n.B",     "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B",        
+                             "SOSIP.")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+## Detection Reagent: IgG2
+```{r Corr_1_IgG2, message=FALSE,echo=FALSE,warning=FALSE,fig.width=17,fig.height=12}
+
+corrman1 = corrman[corrman$detectionreagent=="IgG2",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \n93TH975 \n(insect).\nCRF01_AE",   "r.gp120 \nBaL \n(293T/Lewis)\n.B",    "r.gp120 \nCM235 \n(HEK 293).\nCRF01_AE",
+                             "r.gp120 \nCM235 \n(insect).\nCRF01_AE",     "r.gp120 \nDu151 \n(HEK 293)\n.C",     "r.gp120 \nDu156.12 \n(HEK 293)\n.C",
+                             "r.gp120 \nIIIB \n(CHO)\n.B",                "r.gp120 \nJRCSF \n(HEK 293)\n.B",     "r.gp120 \nMN \n(HEK 293)\n.B",
+                             "r.gp120 \nPVO.B",                       "r.gp120 \nTRO \n(HEK 293)\n.B",       "r.gp120 \nYU2 \n(HEK 293)\n.B",                  
+                             "r.gp120 \nZM109F.PB4 \n(HEK 293)\n.C",      "r.gp140_aa24-680 \nBal1A \n(trimer/HEK 293)\n.B", "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                             "r.gp140 \nDu151 \n(HEK 293)\n.C",           "r.gp140 \nSF162 \n(HEK 293)\n.B",     "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B",        
+                             "SOSIP.")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+## Detection Reagent: IgG3
+```{r Corr_1_IgG3, message=FALSE,echo=FALSE,warning=FALSE,fig.width=17,fig.height=12}
+
+corrman1 = corrman[corrman$detectionreagent=="IgG3",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \n93TH975 \n(insect).\nCRF01_AE",   "r.gp120 \nBaL \n(293T/Lewis)\n.B",    "r.gp120 \nCM235 \n(HEK 293).\nCRF01_AE",
+                             "r.gp120 \nCM235 \n(insect).\nCRF01_AE",     "r.gp120 \nDu151 \n(HEK 293)\n.C",     "r.gp120 \nDu156.12 \n(HEK 293)\n.C",
+                             "r.gp120 \nIIIB \n(CHO)\n.B",                "r.gp120 \nJRCSF \n(HEK 293)\n.B",     "r.gp120 \nMN \n(HEK 293)\n.B",
+                             "r.gp120 \nPVO.B",                       "r.gp120 \nTRO \n(HEK 293)\n.B",       "r.gp120 \nYU2 \n(HEK 293)\n.B",                  
+                             "r.gp120 \nZM109F.PB4 \n(HEK 293)\n.C",      "r.gp140_aa24-680 \nBal1A \n(trimer/HEK 293)\n.B", "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                             "r.gp140 \nDu151 \n(HEK 293)\n.C",           "r.gp140 \nSF162 \n(HEK 293)\n.B",     "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B",        
+                             "SOSIP.")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+## Detection Reagent: IgG4
+```{r Corr_1_IgG4, message=FALSE,echo=FALSE,warning=FALSE,fig.width=17,fig.height=12}
+
+corrman1 = corrman[corrman$detectionreagent=="IgG4",]
+corrman1.wide = dcast(corrman1, sample ~ aginfo, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+colnames(corrman1.wide) = c("r.gp120 \n93TH975 \n(insect).\nCRF01_AE",   "r.gp120 \nBaL \n(293T/Lewis)\n.B",    "r.gp120 \nCM235 \n(HEK 293).\nCRF01_AE",
+                             "r.gp120 \nCM235 \n(insect).\nCRF01_AE",     "r.gp120 \nDu151 \n(HEK 293)\n.C",     "r.gp120 \nDu156.12 \n(HEK 293)\n.C",
+                             "r.gp120 \nIIIB \n(CHO)\n.B",                "r.gp120 \nJRCSF \n(HEK 293)\n.B",     "r.gp120 \nMN \n(HEK 293)\n.B",
+                             "r.gp120 \nPVO.B",                       "r.gp120 \nTRO \n(HEK 293)\n.B",       "r.gp120 \nYU2 \n(HEK 293)\n.B",                  
+                             "r.gp120 \nZM109F.PB4 \n(HEK 293)\n.C",      "r.gp140_aa24-680 \nBal1A \n(trimer/HEK 293)\n.B", "r.gp140 \nCN54 \n(CHO/ARRRP).\nCRF07_BC",        
+                             "r.gp140 \nDu151 \n(HEK 293)\n.C",           "r.gp140 \nSF162 \n(HEK 293)\n.B",     "r.gp41_aa23-170 \nHxBc2 \n(HEK 293)\n.B",        
+                             "SOSIP.")
+
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=0.8)
+```
+
+
+# Correlation Matrices for each Antigen
+
+## Antigen: r.gp120 CM235 (insect).CRF01_AE
+```{r Corr_1_antigen1, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp120 CM235 (insect).CRF01_AE",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp120 93TH975 (insect).CRF01_AE
+```{r Corr_1_antigen2, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp120 93TH975 (insect).CRF01_AE",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp120 IIIB (CHO).B
+```{r Corr_1_antigen3, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp120 IIIB (CHO).B",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp41_aa23-170 HxBc2 (HEK 293).B
+```{r Corr_1_antigen4, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp41_aa23-170 HxBc2 (HEK 293).B",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp120 PVO.B
+```{r Corr_1_antigen5, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp120 PVO.B",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp120 YU2 (HEK 293).B
+```{r Corr_1_antigen6, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp120 YU2 (HEK 293).B",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp140 CN54 (CHO/ARRRP).CRF07_BC
+```{r Corr_1_antigen7, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp140 CN54 (CHO/ARRRP).CRF07_BC",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: SOSIP.
+```{r Corr_1_antigen8, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="SOSIP.",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp140_aa24-680 Bal1A (trimer/HEK 293).B
+```{r Corr_1_antigen9, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp140_aa24-680 Bal1A (trimer/HEK 293).B",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp120 TRO (HEK 293).B
+```{r Corr_1_antigen10, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp120 TRO (HEK 293).B",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp120 Du156.12 (HEK 293).C
+```{r Corr_1_antigen11, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp120 Du156.12 (HEK 293).C",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp120 JRCSF (HEK 293).B
+```{r Corr_1_antigen12, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp120 JRCSF (HEK 293).B",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp120 BaL (293T/Lewis).B
+```{r Corr_1_antigen13, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp120 BaL (293T/Lewis).B",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp120 MN (HEK 293).B
+```{r Corr_1_antigen14, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp120 MN (HEK 293).B",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp120 Du151 (HEK 293).C
+```{r Corr_1_antigen15, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp120 Du151 (HEK 293).C",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp140 SF162 (HEK 293).B
+```{r Corr_1_antigen16, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp140 SF162 (HEK 293).B",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp140 Du151 (HEK 293).C
+```{r Corr_1_antigen17, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp140 Du151 (HEK 293).C",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp120 ZM109F.PB4 (HEK 293).C
+```{r Corr_1_antigen18, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp120 ZM109F.PB4 (HEK 293).C",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+## Antigen: r.gp120 CM235 (HEK 293).CRF01_AE
+```{r Corr_1_antigen19, message=FALSE,echo=FALSE,warning=FALSE,fig.width=10,fig.height=7}
+corrman1 = corrman[corrman$aginfo=="r.gp120 CM235 (HEK 293).CRF01_AE",]
+corrman1.wide = dcast(corrman1, sample ~ detectionreagent, value.var="fi")
+corrman1.wide = corrman1.wide[,-1]
+corrman1.wide = corrman1.wide[,order(names(corrman1.wide))]
+pairs(corrman1.wide, cex.labels=1.2, diag.panel=mydiag.panel,label.pos=0.5,lower.panel=panel.spearman, gap=0, xaxt='n',yaxt='n',pch=20,cex=2)
+```
+
+
+
+
+
